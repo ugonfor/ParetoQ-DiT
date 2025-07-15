@@ -45,7 +45,10 @@ from models.modeling_flux_quant import (
     FluxTransformer2DModel as FluxTransformer2DModelQuant,
 )
 
-from .utils.prompt_list import get_default_prompts  # Custom module to load default prompts
+from utils.prompt_list import get_default_prompts  # Custom module to load default prompts
+
+DEBUG = True
+
 
 def measure_linear_weights_with_size(model):
     total_params = 0
@@ -60,8 +63,9 @@ def measure_linear_weights_with_size(model):
             dtype_size = torch.tensor([], dtype=weight.dtype).element_size()  # 바이트 크기
             mem_bytes = num_params * dtype_size
             mem_mb = mem_bytes / (1024 ** 2)
-
-            print(f"{name:20s} | shape={tuple(weight.shape):15s} | params={num_params:7d} | size={mem_mb:.4f} MB")
+            
+            if DEBUG:
+                print(f"{name:20s} | shape={str(tuple(weight.shape)):15s} | params={num_params:7d} | size={mem_mb:.4f} MB | class={'QuantizeLinear' if type(module) == QuantizeLinear else 'nn.Linear'}")
             
             total_params += num_params
             total_bytes += mem_bytes
