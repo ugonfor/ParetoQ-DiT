@@ -138,8 +138,10 @@ class StretchedElasticQuant(torch.autograd.Function):
             else 1.0 / math.sqrt(input.numel() * Qp)
         )
         ctx.save_for_backward(input, alpha)
+
+        # clip value for stretched elastic quant
         clip_val = 1 - 1e-2
-        if num_bits == 0:
+        if num_bits == 0: # 1.58-bit quant
             n_levels = 1.5
             shift = 0
         else:
@@ -265,7 +267,7 @@ class QuantizeLinear(nn.Linear):
 
         if self.w_bits >= 16:
             weight = self.weight
-        elif self.w_bits == 2 or self.w_bits == 0:
+        elif self.w_bits == 2 or self.w_bits == 0: # w_bits == 0 for 1.58-bit quant
             weight = StretchedElasticQuant.apply(
                 real_weights,
                 self.weight_clip_val,
