@@ -38,10 +38,14 @@ from typing import List
 import torch
 import torch.nn as nn
 from diffusers import DiffusionPipeline
-from diffusers import FluxPipeline, FluxTransformer2DModel
+from diffusers import FluxPipeline
 from tqdm.auto import tqdm
 
-from prompt_list import get_default_prompts  # Custom module to load default prompts
+from models.modeling_flux_quant import (
+    FluxTransformer2DModel as FluxTransformer2DModelQuant,
+)
+
+from .utils.prompt_list import get_default_prompts  # Custom module to load default prompts
 
 def measure_linear_weights_with_size(model):
     total_params = 0
@@ -151,6 +155,12 @@ def main():
 
     print(f"Loading pipeline '{args.model_id}' …")
     pipe: FluxPipeline = DiffusionPipeline.from_pretrained(args.model_id, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+    
+    pipe.transformer = FluxTransformer2DModelQuant.from_pretrained(
+        args.model_id,
+        subfolder="transformer",
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    )
     
     print("Model Sizes:")
     total_params, total_mb = measure_linear_weights_with_size(pipe.transformer)
