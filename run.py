@@ -36,10 +36,35 @@ from pathlib import Path
 from typing import List
 
 import torch
+import torch.nn as nn
 from diffusers import DiffusionPipeline
+from diffusers import FluxPipeline, FluxTransformer2DModel
 from tqdm.auto import tqdm
 
 from prompt_list import get_default_prompts  # Custom module to load default prompts
+
+def measure_linear_weights_with_size(model):
+    total_params = 0
+    total_bytes = 0
+
+    print("== Linear Layer Weight Details ==")
+    
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            weight = module.weight
+            num_params = weight.numel()
+            dtype_size = torch.tensor([], dtype=weight.dtype).element_size()  # 바이트 크기
+            mem_bytes = num_params * dtype_size
+            mem_mb = mem_bytes / (1024 ** 2)
+
+            print(f"{name:20s} | shape={tuple(weight.shape):15s} | params={num_params:7d} | size={mem_mb:.4f} MB")
+            
+            total_params += num_params
+            total_bytes += mem_bytes
+
+    total_mb = total_bytes / (1024 ** 2)
+    print(f"\nTotal nn.Linear params: {total_params:,} ({total_mb:.4f} MB)")
+    return total_params, total_mb
 
 ###############################################################################
 # 1‑bit‑plus‑sign (≈1.58‑bit) Linear‑layer quantisation helpers
@@ -125,14 +150,20 @@ def main():
     output_path = Path(args.output_path)
 
     print(f"Loading pipeline '{args.model_id}' …")
-    pipe = DiffusionPipeline.from_pretrained(args.model_id, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+    pipe: FluxPipeline = DiffusionPipeline.from_pretrained(args.model_id, torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+    
+    print("Model Sizes:")
+    total_params, total_mb = measure_linear_weights_with_size(pipe.transformer)
+    print(f"Total model parameters: {total_params:,}")
+    print(f"Total model size: {total_mb:.4f} MB")
+    
 
+    # print("Quantising text‑encoder …")
+    # quantize_model(pipe.text_encoder, args.threshold_ratio)
+
+    print("Quantising DiT …")
+    quantize_model(pipe.transformer, args.threshold_ratio)
     breakpoint()
-    print("Quantising text‑encoder …")
-    quantize_model(pipe.text_encoder, args.threshold_ratio)
-
-    print("Quantising UNet …")
-    quantize_model(pipe.unet, args.threshold_ratio)
 
     print(f"Saving quantised checkpoint to '{output_path}' …")
     pipe.save_pretrained(output_path)
