@@ -44,7 +44,6 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 ############################################# Flux Model Quantization ####################################
 from .utils_quant import QuantizeLinear
-W_BITS = 0 # 0: 1.58-bit, 2: 2-bit, 16: 16-bit
 
 ##########################################################################################################
 
@@ -174,6 +173,7 @@ class Attention(nn.Module):
         pre_only=False,
         elementwise_affine: bool = True,
         is_causal: bool = False,
+        w_bits: int = 0,
     ):
         super().__init__()
 
@@ -197,6 +197,7 @@ class Attention(nn.Module):
         self.context_pre_only = context_pre_only
         self.pre_only = pre_only
         self.is_causal = is_causal
+        self.w_bits = w_bits
 
         # we make use of this private variable to know whether this class is loaded
         # with an deprecated state dict so that we can convert it on the fly
@@ -280,22 +281,22 @@ class Attention(nn.Module):
                 f"unknown cross_attention_norm: {cross_attention_norm}. Should be None, 'layer_norm' or 'group_norm'"
             )
 
-        self.to_q = QuantizeLinear(query_dim, self.inner_dim, bias=bias, w_bits=W_BITS)
+        self.to_q = QuantizeLinear(query_dim, self.inner_dim, bias=bias, w_bits=w_bits)
 
         if not self.only_cross_attention:
             # only relevant for the `AddedKVProcessor` classes
-            self.to_k = QuantizeLinear(self.cross_attention_dim, self.inner_kv_dim, bias=bias, w_bits=W_BITS)
-            self.to_v = QuantizeLinear(self.cross_attention_dim, self.inner_kv_dim, bias=bias, w_bits=W_BITS)
+            self.to_k = QuantizeLinear(self.cross_attention_dim, self.inner_kv_dim, bias=bias, w_bits=w_bits)
+            self.to_v = QuantizeLinear(self.cross_attention_dim, self.inner_kv_dim, bias=bias, w_bits=w_bits)
         else:
             self.to_k = None
             self.to_v = None
 
         self.added_proj_bias = added_proj_bias
         if self.added_kv_proj_dim is not None:
-            self.add_k_proj = QuantizeLinear(added_kv_proj_dim, self.inner_kv_dim, bias=added_proj_bias, w_bits=W_BITS)
-            self.add_v_proj = QuantizeLinear(added_kv_proj_dim, self.inner_kv_dim, bias=added_proj_bias, w_bits=W_BITS)
+            self.add_k_proj = QuantizeLinear(added_kv_proj_dim, self.inner_kv_dim, bias=added_proj_bias, w_bits=w_bits)
+            self.add_v_proj = QuantizeLinear(added_kv_proj_dim, self.inner_kv_dim, bias=added_proj_bias, w_bits=w_bits)
             if self.context_pre_only is not None:
-                self.add_q_proj = QuantizeLinear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias, w_bits=W_BITS)
+                self.add_q_proj = QuantizeLinear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias, w_bits=w_bits)
         else:
             self.add_q_proj = None
             self.add_k_proj = None
@@ -303,13 +304,13 @@ class Attention(nn.Module):
 
         if not self.pre_only:
             self.to_out = nn.ModuleList([])
-            self.to_out.append(QuantizeLinear(self.inner_dim, self.out_dim, bias=out_bias, w_bits=W_BITS))
+            self.to_out.append(QuantizeLinear(self.inner_dim, self.out_dim, bias=out_bias, w_bits=w_bits))
             self.to_out.append(nn.Dropout(dropout))
         else:
             self.to_out = None
 
         if self.context_pre_only is not None and not self.context_pre_only:
-            self.to_add_out = QuantizeLinear(self.inner_dim, self.out_context_dim, bias=out_bias, w_bits=W_BITS)
+            self.to_add_out = QuantizeLinear(self.inner_dim, self.out_context_dim, bias=out_bias, w_bits=w_bits)
         else:
             self.to_add_out = None
 
@@ -833,7 +834,7 @@ class Attention(nn.Module):
             out_features = concatenated_weights.shape[0]
 
             # create a new single projection layer and copy over the weights.
-            self.to_qkv = QuantizeLinear(in_features, out_features, bias=self.use_bias, device=device, dtype=dtype)
+            self.to_qkv = QuantizeLinear(in_features, out_features, bias=self.use_bias, device=device, dtype=dtype, w_bits=self.w_bits)
             self.to_qkv.weight.copy_(concatenated_weights)
             if self.use_bias:
                 concatenated_bias = torch.cat([self.to_q.bias.data, self.to_k.bias.data, self.to_v.bias.data])
@@ -844,7 +845,7 @@ class Attention(nn.Module):
             in_features = concatenated_weights.shape[1]
             out_features = concatenated_weights.shape[0]
 
-            self.to_kv = QuantizeLinear(in_features, out_features, bias=self.use_bias, device=device, dtype=dtype, w_bits=W_BITS)
+            self.to_kv = QuantizeLinear(in_features, out_features, bias=self.use_bias, device=device, dtype=dtype, w_bits=self.w_bits)
             self.to_kv.weight.copy_(concatenated_weights)
             if self.use_bias:
                 concatenated_bias = torch.cat([self.to_k.bias.data, self.to_v.bias.data])
@@ -863,7 +864,7 @@ class Attention(nn.Module):
             out_features = concatenated_weights.shape[0]
 
             self.to_added_qkv = QuantizeLinear(
-                in_features, out_features, bias=self.added_proj_bias, device=device, dtype=dtype, w_bits=W_BITS
+                in_features, out_features, bias=self.added_proj_bias, device=device, dtype=dtype, w_bits=self.w_bits
             )
             self.to_added_qkv.weight.copy_(concatenated_weights)
             if self.added_proj_bias:
@@ -898,6 +899,7 @@ class FeedForward(nn.Module):
         final_dropout: bool = False,
         inner_dim=None,
         bias: bool = True,
+        w_bits: int = 0,
     ):
         super().__init__()
         if inner_dim is None:
@@ -923,7 +925,7 @@ class FeedForward(nn.Module):
         # project dropout
         self.net.append(nn.Dropout(dropout))
         # project out
-        self.net.append(QuantizeLinear(inner_dim, dim_out, bias=bias, w_bits=W_BITS))
+        self.net.append(QuantizeLinear(inner_dim, dim_out, bias=bias, w_bits=w_bits))
         # FF as used in Vision Transformer, MLP-Mixer, etc. have a final dropout
         if final_dropout:
             self.net.append(nn.Dropout(dropout))
@@ -945,14 +947,14 @@ class FeedForward(nn.Module):
 
 @maybe_allow_in_graph
 class FluxSingleTransformerBlock(nn.Module):
-    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: float = 4.0):
+    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: float = 4.0, w_bits: int = 0):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
         self.norm = AdaLayerNormZeroSingle(dim)
-        self.proj_mlp = QuantizeLinear(dim, self.mlp_hidden_dim, w_bits=W_BITS)
+        self.proj_mlp = QuantizeLinear(dim, self.mlp_hidden_dim, w_bits=w_bits)
         self.act_mlp = nn.GELU(approximate="tanh")
-        self.proj_out = QuantizeLinear(dim + self.mlp_hidden_dim, dim, w_bits=W_BITS)
+        self.proj_out = QuantizeLinear(dim + self.mlp_hidden_dim, dim, w_bits=w_bits)
 
         if is_torch_npu_available():
             deprecation_message = (
@@ -975,6 +977,7 @@ class FluxSingleTransformerBlock(nn.Module):
             qk_norm="rms_norm",
             eps=1e-6,
             pre_only=True,
+            w_bits=w_bits,
         )
 
     def forward(
@@ -1012,7 +1015,8 @@ class FluxSingleTransformerBlock(nn.Module):
 @maybe_allow_in_graph
 class FluxTransformerBlock(nn.Module):
     def __init__(
-        self, dim: int, num_attention_heads: int, attention_head_dim: int, qk_norm: str = "rms_norm", eps: float = 1e-6
+        self, dim: int, num_attention_heads: int, attention_head_dim: int, qk_norm: str = "rms_norm", eps: float = 1e-6,
+        w_bits: int = 0,
     ):
         super().__init__()
 
@@ -1031,13 +1035,14 @@ class FluxTransformerBlock(nn.Module):
             processor=FluxAttnProcessor2_0(),
             qk_norm=qk_norm,
             eps=eps,
+            w_bits=w_bits,
         )
 
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
+        self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate", w_bits=w_bits)
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff_context = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
+        self.ff_context = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate", w_bits=w_bits)
 
     def forward(
         self,
@@ -1173,6 +1178,7 @@ class FluxTransformer2DModel(
                     dim=self.inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
+                    w_bits=w_bits,
                 )
                 for _ in range(num_layers)
             ]
@@ -1184,6 +1190,7 @@ class FluxTransformer2DModel(
                     dim=self.inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
+                    w_bits=w_bits,
                 )
                 for _ in range(num_single_layers)
             ]
@@ -1193,6 +1200,8 @@ class FluxTransformer2DModel(
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
         self.gradient_checkpointing = False
+        
+        self.w_bits = w_bits
 
     @property
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors
