@@ -26,11 +26,7 @@ from pathlib import Path
 
 log = utils.get_logger("clm")
 
-def sanity(debug=False):
-    dist.init_process_group(backend="nccl")
-    model_args, data_args, training_args = process_args()
-
-    log.info("Start to load model...")
+def load_quantized_model(model_args, training_args, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
     model = FluxTransformer2DModelQuant.from_pretrained(
@@ -39,7 +35,7 @@ def sanity(debug=False):
         torch_dtype=dtype,
         low_cpu_mem_usage=True,
         device_map=None,
-        w_bits=16
+        w_bits=w_bits
     )
 
     if not model_args.contain_weight_clip_val:
@@ -60,19 +56,50 @@ def sanity(debug=False):
                     raise NotImplementedError
 
                 param.data.copy_(scale)
+    return model
 
-    model.cuda()
-    log.info("Complete model loading...")
 
-    pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype)
-
+def sanity(debug=False):
+    dist.init_process_group(backend="nccl")
+    model_args, data_args, training_args = process_args()
 
     prompts = get_default_prompts()
 
-    samples_dir = Path(model_args.output_dir) / "samples"
-    print(f"Generating 4 sample images …")
-    utils.generate_images(pipe, prompts, 4, samples_dir, 'cuda', seed=42)
+    # Sanity Check Full Precision
+    dtype = torch.bfloat16 if training_args.bf16 else torch.float
+    pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
+
+    samples_dir = Path(training_args.output_dir) / "samples" / "bf16"
+    print(f"Generating 2 sample images …")
+    utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
+
+    # Sanity Check bf 16
+    log.info("Start to load model...")
+    model = load_quantized_model(model_args, training_args, w_bits=16)
+    model.cuda()
+    log.info("Complete model loading...")
+
+    pipe.transformer = model
+    
+    samples_dir = Path(training_args.output_dir) / "samples" / "bits_16"
+    print(f"Generating 2 sample images …")
+    utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
+    print(f"Samples saved to '{samples_dir}'")
+
+    # Sanity Check int 8
+    log.info("Start to load model...")
+    model = load_quantized_model(model_args, training_args, w_bits=8)
+    model.cuda()
+    log.info("Complete model loading...")
+
+    pipe.transformer = model
+    
+    samples_dir = Path(training_args.output_dir) / "samples" / "bits_8"
+    print(f"Generating 2 sample images …")
+    utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
+    print(f"Samples saved to '{samples_dir}'")
+
 
 
 

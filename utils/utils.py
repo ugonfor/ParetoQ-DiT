@@ -81,10 +81,8 @@ def generate_images(
         torch.manual_seed(seed)
 
     pipe.set_progress_bar_config(disable=True)
-    pipe.enable_attention_slicing()
 
     for i in tqdm(range(num_images), desc="Generating"):
         prompt = prompts[i % len(prompts)]
-        with torch.amp.autocast(enabled=pipe.torch_dtype == torch.float16):
-            image = pipe(prompt).images[0]
+        image = pipe(prompt).images[0]
         image.save(out_dir / f"sample_{i:03d}.png")
