@@ -1156,6 +1156,7 @@ class FluxTransformer2DModel(
         axes_dims_rope: Tuple[int, int, int] = (16, 56, 56),
         w_bits = 0, # 0: 1.58bit, 2: 2bit
     ):
+        print(f"Using FluxTransformer2DModel with w_bits={w_bits}")
         super().__init__()
         self.out_channels = out_channels or in_channels
         self.inner_dim = num_attention_heads * attention_head_dim

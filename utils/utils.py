@@ -11,6 +11,11 @@ from typing import Dict
 import torch
 import transformers
 
+from diffusers import DiffusionPipeline
+from pathlib import Path
+from tqdm import tqdm
+from typing import List
+
 
 # Define a utility method for setting the logging parameters of a logger
 def get_logger(logger_name):
@@ -56,3 +61,30 @@ def get_local_rank():
             "LOCAL_RANK from os.environ is None, fall back to get rank from torch distributed"
         )
         return torch.distributed.get_rank()
+
+
+###############################################################################
+# Image generation utilities
+###############################################################################
+
+def generate_images(
+    pipe: DiffusionPipeline,
+    prompts: List[str],
+    num_images: int,
+    out_dir: Path,
+    device: str,
+    seed: int | None = None,
+) -> None:
+    """Generate `num_images` images and save as PNG."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    pipe.set_progress_bar_config(disable=True)
+    pipe.enable_attention_slicing()
+
+    for i in tqdm(range(num_images), desc="Generating"):
+        prompt = prompts[i % len(prompts)]
+        with torch.amp.autocast(enabled=pipe.torch_dtype == torch.float16):
+            image = pipe(prompt).images[0]
+        image.save(out_dir / f"sample_{i:03d}.png")
