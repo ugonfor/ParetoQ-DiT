@@ -21,6 +21,8 @@ from transformers import default_data_collator, Trainer
 
 from utils.prompt_list import get_default_prompts
 
+from pathlib import Path
+
 
 log = utils.get_logger("clm")
 
@@ -67,7 +69,7 @@ def sanity(debug=False):
 
     prompts = get_default_prompts()
 
-    samples_dir = "." / "samples"
+    samples_dir = Path(model_args.output_dir) / "samples"
     print(f"Generating 4 sample images …")
     utils.generate_images(pipe, prompts, 4, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
