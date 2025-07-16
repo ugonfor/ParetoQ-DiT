@@ -253,7 +253,7 @@ class QuantizeLinear(nn.Linear):
         w_bits=16,
         weight_layerwise=False,
     ):
-        super(QuantizeLinear, self).__init__(*kargs, bias=False)
+        super(QuantizeLinear, self).__init__(*kargs, bias=bias)
         self.w_bits = w_bits
         self.weight_layerwise = weight_layerwise
         # params for weight quant
