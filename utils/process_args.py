@@ -28,7 +28,7 @@ class ModelArguments:
     w_bits: Optional[int] = field(
         default=32,
         metadata={
-            "help": "#bits to use for quantization; use 16 for evaluating base model. choices=[4, 8, 32]"
+            "help": "#bits to use for quantization; use 16 for evaluating base model. choices=[0, 2, 4, 8, 16, 32]"
         },
     )
     contain_weight_clip_val: Optional[bool] = field(
