@@ -952,9 +952,9 @@ class FluxSingleTransformerBlock(nn.Module):
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
         self.norm = AdaLayerNormZeroSingle(dim)
-        self.proj_mlp = QuantizeLinear(dim, self.mlp_hidden_dim, w_bits=w_bits)
+        self.proj_mlp = QuantizeLinear(dim, self.mlp_hidden_dim, w_bits=w_bits, bias=True)
         self.act_mlp = nn.GELU(approximate="tanh")
-        self.proj_out = QuantizeLinear(dim + self.mlp_hidden_dim, dim, w_bits=w_bits)
+        self.proj_out = QuantizeLinear(dim + self.mlp_hidden_dim, dim, w_bits=w_bits, bias=True)
 
         if is_torch_npu_available():
             deprecation_message = (
