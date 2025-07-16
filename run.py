@@ -43,6 +43,7 @@ from tqdm.auto import tqdm
 
 from models.modeling_flux_quant import (
     FluxTransformer2DModel as FluxTransformer2DModelQuant,
+    QuantizeLinear
 )
 
 from utils.prompt_list import get_default_prompts  # Custom module to load default prompts
