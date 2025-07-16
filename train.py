@@ -39,7 +39,7 @@ def train():
         cache_dir=training_args.cache_dir,
         torch_dtype=dtype,
         low_cpu_mem_usage=True,
-        device_map='cpu',
+        device_map=None,
     )
     breakpoint()
 
