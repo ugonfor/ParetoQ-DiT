@@ -274,7 +274,7 @@ class QuantizeLinear(nn.Linear):
                 self.w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
-        elif self.w_bits <= 4:
+        elif self.w_bits <= 8:
             weight = LsqBinaryTernaryExtension.apply(
                 real_weights,
                 self.weight_clip_val,
