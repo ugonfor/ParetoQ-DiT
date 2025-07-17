@@ -22,7 +22,7 @@ from transformers import default_data_collator, Trainer
 from utils.prompt_list import get_default_prompts
 
 from pathlib import Path
-
+from tqdm import tqdm
 
 log = utils.get_logger("clm")
 
@@ -50,9 +50,8 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
         )
 
     if not model_args.contain_weight_clip_val:
-        for name, param in model.named_parameters():
+        for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
             if "weight_clip_val" in name:
-                print("initialize", name)
                 weight_name = name.replace("weight_clip_val", "weight")
                 weight_param = dict(model.named_parameters()).get(weight_name, None)
 
