@@ -26,42 +26,60 @@ from pathlib import Path
 
 log = utils.get_logger("clm")
 
-def load_quantized_model(model_args, training_args, w_bits=16):
+def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
-    model = FluxTransformer2DModelQuant.from_pretrained(
-        pretrained_model_name_or_path=model_args.input_model_filename,
-        subfolder="transformer",
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        device_map=None,
-        w_bits=w_bits
-    )
+    if cache_dir.exists():
+        log.info(f"Loading quantized model from cache directory: {cache_dir}")
+        model = FluxTransformer2DModelQuant.from_pretrained(
+            pretrained_model_name_or_path=cache_dir,
+            subfolder="transformer",
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map=None,
+            w_bits=w_bits
+        )
+    else:
+        model = FluxTransformer2DModelQuant.from_pretrained(
+            pretrained_model_name_or_path=model_args.input_model_filename,
+            subfolder="transformer",
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map=None,
+            w_bits=w_bits
+        )
 
     if not model_args.contain_weight_clip_val:
         for name, param in model.named_parameters():
             if "weight_clip_val" in name:
+                print("initialize", name)
                 weight_name = name.replace("weight_clip_val", "weight")
                 weight_param = dict(model.named_parameters()).get(weight_name, None)
 
-                if model_args.w_bits == 1:
+                if w_bits == 1:
                     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif model_args.w_bits == 0 or model_args.w_bits == 2:
+                elif w_bits == 0 or w_bits == 2:
                     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif model_args.w_bits == 3 or model_args.w_bits == 4:
+                elif 3 <= w_bits and w_bits <= 8:
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (model_args.w_bits - 1) - 1
+                    maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq
                 else:
                     raise NotImplementedError
 
                 param.data.copy_(scale)
+    
+    if not cache_dir.exists():
+        log.info(f"Saving quantized model to cache directory: {cache_dir}")
+        model.save_pretrained(cache_dir, safe_serialization=True)
+
     return model
 
 
 def sanity(debug=False):
     dist.init_process_group(backend="nccl")
     model_args, data_args, training_args = process_args()
+    if debug: print(model_args, data_args, training_args)
 
     prompts = get_default_prompts()
 
@@ -76,7 +94,8 @@ def sanity(debug=False):
 
     # Sanity Check bf 16
     log.info("Start to load model...")
-    model = load_quantized_model(model_args, training_args, w_bits=16)
+    cache_dir = Path(training_args.output_dir) / "cache" / "bf16"
+    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=16)
     model.cuda()
     log.info("Complete model loading...")
 
@@ -89,8 +108,8 @@ def sanity(debug=False):
 
     # Sanity Check int 8
     log.info("Start to load model...")
-    model = load_quantized_model(model_args, training_args, w_bits=8)
-    model.cuda()
+    cache_dir = Path(training_args.output_dir) / "cache" / "int8"
+    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=8)
     log.info("Complete model loading...")
 
     pipe.transformer = model
