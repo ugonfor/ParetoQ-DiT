@@ -49,6 +49,7 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
         )
 
     if not model_args.contain_weight_clip_val:
+        weight_clip_val_dict = {}
         for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
             if "weight_clip_val" in name:
                 weight_name = name.replace("weight_clip_val", "weight")
@@ -64,13 +65,10 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
                     scale = xmax / maxq
                 else:
                     raise NotImplementedError
-
-                param.data.copy_(scale)
+                    
+                weight_clip_val_dict[name] = scale
+        model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
     
-    if not cache_dir.exists():
-        log.info(f"Saving quantized model to cache directory: {cache_dir}")
-        model.save_pretrained(cache_dir, safe_serialization=True)
-
     return model
 
 
@@ -92,7 +90,7 @@ def sanity(debug=False):
 
     # Sanity Check bf 16
     log.info("Start to load model...")
-    cache_dir = Path(training_args.output_dir) / "cache" / "bf16"
+    cache_dir = Path(training_args.output_dir) / "cache" / "bits_16"
     model = load_quantized_model(model_args, training_args, cache_dir, w_bits=16)
     model.cuda()
     log.info("Complete model loading...")
@@ -107,7 +105,7 @@ def sanity(debug=False):
     # Sanity Check int 8
     log.info("Start to load model...")
     cache_dir = Path(training_args.output_dir) / "cache" / "int8"
-    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=8)
+    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=8).to('cuda')
     log.info("Complete model loading...")
 
     pipe.transformer = model
@@ -117,6 +115,7 @@ def sanity(debug=False):
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
 
+    breakpoint()
 
 
 
