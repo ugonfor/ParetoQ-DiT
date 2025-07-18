@@ -1155,8 +1155,17 @@ class FluxTransformer2DModel(
         guidance_embeds: bool = False,
         axes_dims_rope: Tuple[int, int, int] = (16, 56, 56),
         w_bits = 0, # 0: 1.58bit, 2: 2bit
+        dataset_collect: bool = False,
     ):
-        print(f"Using FluxTransformer2DModel with w_bits={w_bits}")
+
+        self.w_bits = w_bits
+        self.dataset_collect = dataset_collect
+        if self.dataset_collect:
+            print("Dataset Collection")
+            self.dataset_dict = {'input': [], 'output': []}
+            self.w_bits = 16
+        print(f"Using FluxTransformer2DModel with w_bits={self.w_bits}")
+
         super().__init__()
         self.out_channels = out_channels or in_channels
         self.inner_dim = num_attention_heads * attention_head_dim
@@ -1202,7 +1211,7 @@ class FluxTransformer2DModel(
 
         self.gradient_checkpointing = False
         
-        self.w_bits = w_bits
+
 
     @property
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors
@@ -1345,6 +1354,22 @@ class FluxTransformer2DModel(
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
             `tuple` where the first element is the sample tensor.
         """
+        self.dataset_dict['input'].append(
+            (hidden_states.to('cpu'),
+            encoder_hidden_states.to('cpu'),
+            pooled_projections.to('cpu'),
+            timestep.to('cpu'),
+            img_ids.to('cpu'),
+            txt_ids.to('cpu'),
+            guidance.to('cpu'),
+            joint_attention_kwargs,
+            controlnet_block_samples,
+            controlnet_single_block_samples,
+            return_dict,
+            controlnet_blocks_repeat)
+        )
+        
+
         if joint_attention_kwargs is not None:
             joint_attention_kwargs = joint_attention_kwargs.copy()
             lora_scale = joint_attention_kwargs.pop("scale", 1.0)
@@ -1459,7 +1484,16 @@ class FluxTransformer2DModel(
             # remove `lora_scale` from each PEFT layer
             unscale_lora_layers(self, lora_scale)
 
+
+        if self.dataset_collect:
+            self.dataset_dict['output'].append(
+                (output.to('cpu'),)
+            )
+
         if not return_dict:
             return (output,)
 
         return Transformer2DModelOutput(sample=output)
+
+    def clear_dataset(self):
+        self.dataset_dict = {'input': [], 'output': []}
