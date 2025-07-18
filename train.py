@@ -8,6 +8,7 @@ import math
 from models.modeling_flux_quant import (
     FluxTransformer2DModel as FluxTransformer2DModelQuant,
 )
+from diffusers import FluxPipeline, DiffusionPipeline
 import copy
 import torch
 import transformers
@@ -18,63 +19,101 @@ from utils.process_args import process_args
 from torch import distributed as dist
 from transformers import default_data_collator, Trainer
 
+from utils.prompt_list import get_default_prompts
+
+from pathlib import Path
+from tqdm import tqdm
+
 log = utils.get_logger("clm")
 
 
-
-def train():
-    dist.init_process_group(backend="nccl")
-    model_args, data_args, training_args = process_args()
-
-    log.info("Start to load model...")
+def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
-    # config = LlamaConfig.from_pretrained(model_args.input_model_filename)
-    # config.w_bits = model_args.w_bits
-
-    model = FluxTransformer2DModelQuant.from_pretrained(
-        pretrained_model_name_or_path=model_args.input_model_filename,
-        # config=config,
-        subfolder="transformer",
-        cache_dir=training_args.cache_dir,
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        device_map=None,
-    )
-    breakpoint()
+    if (cache_dir / "diffusion_pytorch_model.safetensors.index.json").exists():
+        log.info(f"Loading quantized model from cache directory: {cache_dir}")
+        model = FluxTransformer2DModelQuant.from_pretrained(
+            pretrained_model_name_or_path=cache_dir,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map=None,
+            w_bits=w_bits
+        )
+    else:
+        model = FluxTransformer2DModelQuant.from_pretrained(
+            pretrained_model_name_or_path=model_args.input_model_filename,
+            subfolder="transformer",
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map=None,
+            w_bits=w_bits
+        )
 
     if not model_args.contain_weight_clip_val:
-        for name, param in model.named_parameters():
+        weight_clip_val_dict = {}
+        for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
             if "weight_clip_val" in name:
                 weight_name = name.replace("weight_clip_val", "weight")
                 weight_param = dict(model.named_parameters()).get(weight_name, None)
 
-                if model_args.w_bits == 1:
+                if w_bits == 1:
                     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif model_args.w_bits == 0 or model_args.w_bits == 2:
+                elif w_bits == 0 or w_bits == 2:
                     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif model_args.w_bits == 3 or model_args.w_bits == 4:
+                elif 3 <= w_bits and w_bits <= 8:
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (model_args.w_bits - 1) - 1
+                    maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq
                 else:
                     raise NotImplementedError
+                    
+                weight_clip_val_dict[name] = scale
+        model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
+    
+    return model
 
-                param.data.copy_(scale)
+def train():
+    dist.init_process_group(backend="nccl")
+    model_args, data_args, training_args = process_args()
+    print(model_args, data_args, training_args)
+    
+    ### Dataset Generation
+    ## Configuration
+    dataset_dir = Path(training_args.output_dir) / "dataset"
+    dataset_dir.mkdir()
 
-    model.cuda()
+    ## Load Model
+    dtype = torch.bfloat16 if training_args.bf16 else torch.float
+    pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
+    cache_dir = Path(training_args.output_dir) / "cache" / f"bits_16" 
+    pipe.transformer = model = FluxTransformer2DModelQuant.from_pretrained(
+            pretrained_model_name_or_path=cache_dir,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map=None,
+            w_bits=16,
+            dataset_collect=True,
+        ).to('cuda')
+    
+    ## Load Prompt List
+    prompt_list = get_default_prompts()
+
+    ## Dataset Generation
+    for idx, prompt in tqdm(enumerate(prompt_list)): 
+        pipe(prompt)
+        torch.save(pipe.transformer.dataset_dict, dataset_dir / f'{idx}_{prompt.replace(" ", "_")}')
+        pipe.transformer.clear_dataset()
+        torch.cuda.empty_cache()
+
+    
+    ## Quantization Aware Training
+    # Load Model
+    log.info(f"load_model, w_bits: {model_args.w_bits}")
+    cache_dir = Path(training_args.output_dir) / "cache" / f"bits_{model_args.w_bits}" 
+    pipe.transformer = load_quantized_model(model_args, training_args, cache_dir, w_bits=model_args.w_bits).to('cuda')
     log.info("Complete model loading...")
 
-    log.info("Start to load tokenizer...")
-    tokenizer = transformers.LlamaTokenizerFast.from_pretrained(
-        pretrained_model_name_or_path=model_args.input_model_filename,
-        cache_dir=training_args.cache_dir,
-        model_max_length=training_args.model_max_length,
-        padding_side="right",
-        add_bos_token=False,
-        add_eos_token=False,
-    )
-    log.info("Complete tokenizer loading...")
+    breakpoint()
 
     train_dataset, valid_dataset = datautils.get_train_val_dataset(
         train_path=data_args.train_data_local_path,
