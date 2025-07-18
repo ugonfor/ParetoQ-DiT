@@ -14,6 +14,7 @@ import torch
 import transformers
 from utils import utils
 from utils import datautils
+from utils import trainer
 
 from utils.process_args import process_args
 from torch import distributed as dist
@@ -49,26 +50,26 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
             w_bits=w_bits
         )
 
-    if not model_args.contain_weight_clip_val:
-        weight_clip_val_dict = {}
-        for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
-            if "weight_clip_val" in name:
-                weight_name = name.replace("weight_clip_val", "weight")
-                weight_param = dict(model.named_parameters()).get(weight_name, None)
+        if not model_args.contain_weight_clip_val:
+            weight_clip_val_dict = {}
+            for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
+                if "weight_clip_val" in name:
+                    weight_name = name.replace("weight_clip_val", "weight")
+                    weight_param = dict(model.named_parameters()).get(weight_name, None)
 
-                if w_bits == 1:
-                    scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif w_bits == 0 or w_bits == 2:
-                    scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif 3 <= w_bits and w_bits <= 8:
-                    xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (w_bits - 1) - 1
-                    scale = xmax / maxq
-                else:
-                    raise NotImplementedError
-                    
-                weight_clip_val_dict[name] = scale
-        model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
+                    if w_bits == 1:
+                        scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
+                    elif w_bits == 0 or w_bits == 2:
+                        scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    elif 3 <= w_bits and w_bits <= 8:
+                        xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                        maxq = 2 ** (w_bits - 1) - 1
+                        scale = xmax / maxq
+                    else:
+                        raise NotImplementedError
+                        
+                    weight_clip_val_dict[name] = scale
+            model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
     
     return model
 
@@ -80,13 +81,13 @@ def train():
     ### Dataset Generation
     ## Configuration
     dataset_dir = Path(training_args.output_dir) / "dataset"
-    dataset_dir.mkdir()
+    dataset_dir.mkdir(exist_ok=True)
 
     ## Load Model
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
     pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
     cache_dir = Path(training_args.output_dir) / "cache" / f"bits_16" 
-    pipe.transformer = model = FluxTransformer2DModelQuant.from_pretrained(
+    org_model = FluxTransformer2DModelQuant.from_pretrained(
             pretrained_model_name_or_path=cache_dir,
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
@@ -94,48 +95,38 @@ def train():
             w_bits=16,
             dataset_collect=True,
         ).to('cuda')
-    
+    pipe.transformer = org_model
+
     ## Load Prompt List
     prompt_list = get_default_prompts()
 
     ## Dataset Generation
-    for idx, prompt in tqdm(enumerate(prompt_list)): 
-        pipe(prompt)
-        torch.save(pipe.transformer.dataset_dict, dataset_dir / f'{idx}_{prompt.replace(" ", "_")}')
-        pipe.transformer.clear_dataset()
-        torch.cuda.empty_cache()
-
+    if not (dataset_dir / f'{len(prompt_list)-1}_{prompt_list[-1].replace(" ", "_")}').exists():
+        for idx, prompt in tqdm(enumerate(prompt_list)): 
+            pipe(prompt)
+            torch.save(pipe.transformer.dataset_dict, dataset_dir / f'{idx}_{prompt.replace(" ", "_")}')
+            pipe.transformer.clear_dataset()
+            torch.cuda.empty_cache()
     
     ## Quantization Aware Training
     # Load Model
     log.info(f"load_model, w_bits: {model_args.w_bits}")
     cache_dir = Path(training_args.output_dir) / "cache" / f"bits_{model_args.w_bits}" 
-    pipe.transformer = load_quantized_model(model_args, training_args, cache_dir, w_bits=model_args.w_bits).to('cuda')
+    q_model = load_quantized_model(model_args, training_args, cache_dir, w_bits=model_args.w_bits).to('cuda')
     log.info("Complete model loading...")
+    torch.cuda.empty_cache()
 
-    breakpoint()
+    dataset = trainer.TorchFileDataset(dataset_dir)
+    train_data, valid_data = dataset, dataset[-1:]
 
-    train_dataset, valid_dataset = datautils.get_train_val_dataset(
-        train_path=data_args.train_data_local_path,
-        valid_path=data_args.eval_data_local_path
-        if data_args.eval_data_local_path is not None
-        else None,
-    )
-    train_data = datautils.CustomJsonDataset(
-        train_dataset, tokenizer, block_size=training_args.model_max_length
-    )
-    valid_data = datautils.CustomJsonDataset(
-        valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024)
-    )
-    model.config.use_cache = False
-    myTrainer = Trainer
-    trainer = myTrainer(
-        model=model,
-        tokenizer=tokenizer,
+    trainer = trainer.FluxQATTrainer(
+        org_model = org_model,
+        flux_pipeline = pipe,
+        model = q_model,
         args=training_args,
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
-        data_collator=default_data_collator,
+        data_collator=trainer.custom_collate_fn,
     )
 
     if training_args.do_train:
@@ -145,18 +136,8 @@ def train():
 
     # Evaluation
     if training_args.do_eval:
-        model.to("cuda")
-        metrics = trainer.evaluate()
-        max_eval_samples = len(valid_data)
-        metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
-        try:
-            perplexity = math.exp(metrics["eval_loss"])
-        except OverflowError:
-            perplexity = float("inf")
-        metrics["perplexity"] = perplexity
-
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
+        utils.generate_images(pipe, ["A lone violinist playing on top of a sinking airship during golden hour, with sheet music flying into the wind and glowing birds circling above"], 
+                            1, out_dir=training_args.output_dir / "eval" / f"last")
 
     torch.distributed.barrier()
 
