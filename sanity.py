@@ -29,11 +29,10 @@ log = utils.get_logger("clm")
 def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
-    if cache_dir.exists():
+    if (cache_dir / "diffusion_pytorch_model.safetensors.index.json").exists():
         log.info(f"Loading quantized model from cache directory: {cache_dir}")
         model = FluxTransformer2DModelQuant.from_pretrained(
             pretrained_model_name_or_path=cache_dir,
-            subfolder="transformer",
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
             device_map=None,
@@ -113,7 +112,7 @@ def sanity(debug=False):
 
     pipe.transformer = model
     
-    samples_dir = Path(training_args.output_dir) / "samples" / "bits_8"
+    samples_dir = Path(training_args.output_dir) / "samples" / "int8"
     print(f"Generating 2 sample images …")
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
