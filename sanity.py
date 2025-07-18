@@ -88,32 +88,34 @@ def sanity(debug=False):
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
 
-    # Sanity Check bf 16
-    log.info("Start to load model...")
-    cache_dir = Path(training_args.output_dir) / "cache" / "bits_16"
-    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=16)
-    model.cuda()
-    log.info("Complete model loading...")
+    # # Sanity Check bf 16
+    # log.info("Start to load model...")
+    # cache_dir = Path(training_args.output_dir) / "cache" / "bits_16"
+    # model = load_quantized_model(model_args, training_args, cache_dir, w_bits=16)
+    # model.cuda()
+    # log.info("Complete model loading...")
 
-    pipe.transformer = model
+    # pipe.transformer = model
     
-    samples_dir = Path(training_args.output_dir) / "samples" / "bits_16"
-    print(f"Generating 2 sample images …")
-    utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
-    print(f"Samples saved to '{samples_dir}'")
+    # samples_dir = Path(training_args.output_dir) / "samples" / "bits_16"
+    # print(f"Generating 2 sample images …")
+    # utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
+    # print(f"Samples saved to '{samples_dir}'")
+    # del model
 
-    # Sanity Check int 8
-    log.info("Start to load model...")
-    cache_dir = Path(training_args.output_dir) / "cache" / "int8"
-    model = load_quantized_model(model_args, training_args, cache_dir, w_bits=8).to('cuda')
-    log.info("Complete model loading...")
+    # # Sanity Check int 8
+    # log.info("Start to load model...")
+    # cache_dir = Path(training_args.output_dir) / "cache" / "int8"
+    # model = load_quantized_model(model_args, training_args, cache_dir, w_bits=8).to('cuda')
+    # log.info("Complete model loading...")
 
-    pipe.transformer = model
+    # pipe.transformer = model
     
-    samples_dir = Path(training_args.output_dir) / "samples" / "int8"
-    print(f"Generating 2 sample images …")
-    utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
-    print(f"Samples saved to '{samples_dir}'")
+    # samples_dir = Path(training_args.output_dir) / "samples" / "int8"
+    # print(f"Generating 2 sample images …")
+    # utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
+    # print(f"Samples saved to '{samples_dir}'")
+    # del model
 
     # Sanity Check int 4
     log.info("Start to load model...")
@@ -127,6 +129,7 @@ def sanity(debug=False):
     print(f"Generating 2 sample images …")
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
+    del model
 
     # Sanity Check int 2
     log.info("Start to load model...")
@@ -140,6 +143,7 @@ def sanity(debug=False):
     print(f"Generating 2 sample images …")
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
+    del model
 
     # Sanity Check int 1.58
     log.info("Start to load model...")
@@ -153,6 +157,7 @@ def sanity(debug=False):
     print(f"Generating 2 sample images …")
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
+    del model
 
 
 if __name__ == "__main__":
