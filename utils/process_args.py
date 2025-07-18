@@ -67,7 +67,7 @@ class DataArguments:
 class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     optim: Optional[str] = field(default="adamw_torch")
-    output_dir: Optional[str] = field(default="/tmp/output/")
+    output_dir: Optional[str] = field(default="./output/")
     model_max_length: Optional[int] = field(
         default=512,
         metadata={
