@@ -37,7 +37,7 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
         model = FluxTransformer2DModelQuant.from_pretrained(
             pretrained_model_name_or_path=cache_dir,
             torch_dtype=dtype,
-            low_cpu_mem_usage=True,
+            low_cpu_mem_usage=False,
             device_map=None,
             w_bits=w_bits
         )
@@ -46,7 +46,7 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
             pretrained_model_name_or_path=model_args.input_model_filename,
             subfolder="transformer",
             torch_dtype=dtype,
-            low_cpu_mem_usage=True,
+            low_cpu_mem_usage=False,
             device_map=None,
             w_bits=w_bits
         )
