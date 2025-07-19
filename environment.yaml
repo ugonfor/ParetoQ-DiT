@@ -24,3 +24,4 @@ dependencies:
       - sentencepiece
       - protobuf
       - tensorboard
+      - bitsandbytes

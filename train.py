@@ -24,6 +24,7 @@ from utils.prompt_list import get_default_prompts
 
 from pathlib import Path
 from tqdm import tqdm
+import gc
 
 log = utils.get_logger("clm")
 
@@ -73,66 +74,79 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     
     return model
 
-def train():
+def train(debug=True):
     dist.init_process_group(backend="nccl")
     model_args, data_args, training_args = process_args()
-    print(model_args, data_args, training_args)
     
     ### Dataset Generation
     ## Configuration
     dataset_dir = Path(training_args.output_dir) / "dataset"
     dataset_dir.mkdir(exist_ok=True)
 
-    ## Load Model
-    dtype = torch.bfloat16 if training_args.bf16 else torch.float
-    pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
-    cache_dir = Path(training_args.output_dir) / "cache" / f"bits_16" 
-    org_model = FluxTransformer2DModelQuant.from_pretrained(
-            pretrained_model_name_or_path=cache_dir,
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-            device_map=None,
-            w_bits=16,
-            dataset_collect=True,
-        ).to('cuda')
-    pipe.transformer = org_model
-
     ## Load Prompt List
     prompt_list = get_default_prompts()
 
     ## Dataset Generation
     if not (dataset_dir / f'{len(prompt_list)-1}_{prompt_list[-1].replace(" ", "_")}').exists():
+        ## Load Model
+        dtype = torch.bfloat16 if training_args.bf16 else torch.float
+        pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
+        cache_dir = Path(training_args.output_dir) / "cache" / f"bits_16" 
+        org_model = FluxTransformer2DModelQuant.from_pretrained(
+                pretrained_model_name_or_path=cache_dir,
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,
+                device_map=None,
+                w_bits=16,
+                dataset_collect=True,
+            ).to('cuda')
+        pipe.transformer = org_model
+
+        ## Dataset Collection
         for idx, prompt in tqdm(enumerate(prompt_list)): 
-            pipe(prompt)
+            pipe([prompt])
             torch.save(pipe.transformer.dataset_dict, dataset_dir / f'{idx}_{prompt.replace(" ", "_")}')
             pipe.transformer.clear_dataset()
             torch.cuda.empty_cache()
+        
+        log.info("Clear Cache Memory")
+        del pipe
+        del org_model
+        torch.cuda.empty_cache()
     
-    ## Quantization Aware Training
-    # Load Model
+    ### Quantization Aware Training
+    ## Load Model
     log.info(f"load_model, w_bits: {model_args.w_bits}")
     cache_dir = Path(training_args.output_dir) / "cache" / f"bits_{model_args.w_bits}" 
     q_model = load_quantized_model(model_args, training_args, cache_dir, w_bits=model_args.w_bits).to('cuda')
+    if training_args.gradient_checkpointing:
+        log.info("Gradient Checkpointing Enable")
+        q_model.enable_gradient_checkpointing()
+        training_args.gradient_checkpointing = False
     log.info("Complete model loading...")
-    torch.cuda.empty_cache()
 
-    dataset = trainer.TorchFileDataset(dataset_dir)
+    ## Load Dataset
+    dataset = trainer.TorchFileDataset(dataset_dir, debug=debug)
     train_data, valid_data = dataset, dataset[-1:]
 
-    trainer = trainer.FluxQATTrainer(
-        org_model = org_model,
-        flux_pipeline = pipe,
+    log.info(f"train dataset size: {len(train_data)}")
+
+    ## Load Trainer
+    mytrainer = trainer.FluxQATTrainer(
         model = q_model,
         args=training_args,
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
-        data_collator=trainer.custom_collate_fn,
+        data_collator=trainer.MyCollator(),
     )
-
+    
+    # Do Train
     if training_args.do_train:
-        train_result = trainer.train()
-        trainer.save_state()
-        utils.safe_save_model_for_hf_trainer(trainer, model_args.output_model_local_path)
+        gc.collect()
+        torch.cuda.empty_cache()
+        train_result = mytrainer.train()
+        mytrainer.save_state()
+        utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
 
     # Evaluation
     if training_args.do_eval:

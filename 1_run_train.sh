@@ -14,7 +14,7 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --log_on_each_node False \
 --logging_dir /tmp/output/runs/current \
 --num_train_epochs 1 \
---per_device_train_batch_size 4 \
+--per_device_train_batch_size 1 \
 --per_device_eval_batch_size 1 \
 --gradient_accumulation_steps 1 \
 --evaluation_strategy "steps" \
@@ -29,6 +29,8 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --lr_scheduler_type "cosine" \
 --logging_steps 1 \
 --tf32 False \
---gradient_checkpointing False \
+--gradient_checkpointing True \
 --qat True \
 --w_bits 0 \
+--optim "adamw_bnb_8bit" \
+--ddp_find_unused_parameters False \
