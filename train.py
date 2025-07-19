@@ -74,7 +74,7 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     
     return model
 
-def train(debug=True):
+def train(debug=False):
     dist.init_process_group(backend="nccl")
     model_args, data_args, training_args = process_args()
     
@@ -131,6 +131,17 @@ def train(debug=True):
 
     log.info(f"train dataset size: {len(train_data)}")
 
+    ## Apply LoRA
+    ## Freeze non-LoRA params
+    total_params = list(map(lambda x: x[0], q_model.named_parameters()))
+    for name, param in q_model.named_parameters():
+        if name.split(".")[-1] == "weight":
+            tmp = name.split(".")
+            tmp[-1] = "weight_clip_val"
+
+            if ".".join(tmp) in total_params:
+                param.requires_grad = False
+
     ## Load Trainer
     mytrainer = trainer.FluxQATTrainer(
         model = q_model,
@@ -138,6 +149,7 @@ def train(debug=True):
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
         data_collator=trainer.MyCollator(),
+        callbacks=[trainer.EmptyCacheCallback],
     )
     
     # Do Train

@@ -289,3 +289,72 @@ class QuantizeLinear(nn.Linear):
             out += self.bias.view(1, -1).expand_as(out)
 
         return out
+
+class LoRAQuantizeLinear(nn.Linear):
+    def __init__(
+        self,
+        *kargs,
+        symmetric=True,
+        bias=False,
+        w_bits=16,
+        weight_layerwise=False,
+        lora_r=16,
+        lora_alpha=1.0,
+    ):
+        super(LoRAQuantizeLinear, self).__init__(*kargs, bias=bias)
+        self.w_bits = w_bits
+        self.weight_layerwise = weight_layerwise
+        
+        # params for weight quant
+        if self.w_bits < 16:
+            self.weight_clip_val = nn.Parameter(torch.Tensor(self.weight.shape[0], 1))
+
+        # LoRA parameters
+        self.lora_r = lora_r
+        self.lora_alpha = lora_alpha
+        self.scaling = lora_alpha / lora_r if lora_r > 0 else 1.0
+        
+        if lora_r > 0:
+            self.lora_A = nn.Parameter(torch.randn(self.out_features, lora_r) * 0.01)
+            self.lora_B = nn.Parameter(torch.randn(lora_r, self.in_features) * 0.01)
+            
+        else:
+            self.lora_A = None
+            self.lora_B = None
+
+    def forward(self, input_):
+        # quantize weight
+        assert len(self.weight.size()) == 2
+        # Step 1: Compose full weight with LoRA
+        real_weights = self.weight
+
+        if self.lora_A is not None and self.lora_B is not None:
+            lora_weight = self.scaling * (self.lora_A @ self.lora_B)
+            real_weights = real_weights + lora_weight.to(real_weights.dtype)
+
+
+        if self.w_bits >= 16:
+            weight = self.weight
+        elif self.w_bits == 2 or self.w_bits == 0: # w_bits == 0 for 1.58-bit quant
+            weight = StretchedElasticQuant.apply(
+                real_weights,
+                self.weight_clip_val,
+                self.w_bits,
+                self.weight_layerwise,
+            ).to(input_.dtype)
+        elif self.w_bits <= 8:
+            weight = LsqBinaryTernaryExtension.apply(
+                real_weights,
+                self.weight_clip_val,
+                self.w_bits,
+                self.weight_layerwise,
+            ).to(input_.dtype)
+        else:
+            raise NotImplementedError
+
+        
+        out = nn.functional.linear(input_, weight)
+        if self.bias is not None:
+            out += self.bias.view(1, -1).expand_as(out)
+
+        return out
