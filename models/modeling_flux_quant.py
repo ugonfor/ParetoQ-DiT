@@ -1161,10 +1161,10 @@ class FluxTransformer2DModel(
         self.w_bits = w_bits
         self.dataset_collect = dataset_collect
         if self.dataset_collect:
-            print("Dataset Collection")
+            logger.info("Dataset Collection")
             self.dataset_dict = {'input': [], 'output': []}
             self.w_bits = 16
-        print(f"Using FluxTransformer2DModel with w_bits={self.w_bits}")
+        logger.info(f"Using FluxTransformer2DModel with w_bits={self.w_bits}")
 
         super().__init__()
         self.out_channels = out_channels or in_channels
@@ -1354,22 +1354,29 @@ class FluxTransformer2DModel(
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
             `tuple` where the first element is the sample tensor.
         """
-        self.dataset_dict['input'].append(
-            (hidden_states.to('cpu'),
-            encoder_hidden_states.to('cpu'),
-            pooled_projections.to('cpu'),
-            timestep.to('cpu'),
-            img_ids.to('cpu'),
-            txt_ids.to('cpu'),
-            guidance.to('cpu'),
-            joint_attention_kwargs,
-            controlnet_block_samples,
-            controlnet_single_block_samples,
-            return_dict,
-            controlnet_blocks_repeat)
-        )
+        if self.dataset_collect:
+            self.dataset_dict['input'].append(
+                (hidden_states.to('cpu'),
+                encoder_hidden_states.to('cpu'),
+                pooled_projections.to('cpu'),
+                timestep.to('cpu'),
+                img_ids.to('cpu'),
+                txt_ids.to('cpu'),
+                guidance.to('cpu'),
+                joint_attention_kwargs,
+                controlnet_block_samples,
+                controlnet_single_block_samples,
+                return_dict,
+                controlnet_blocks_repeat)
+            )
+            # hidden_states.shape
+            # encoder_hidden_states.shape
+            # pooled_projections.shape
+            # timestep.shape
+            # img_ids.shape
+            # txt_ids.shape
+            # guidance.shape
         
-
         if joint_attention_kwargs is not None:
             joint_attention_kwargs = joint_attention_kwargs.copy()
             lora_scale = joint_attention_kwargs.pop("scale", 1.0)
