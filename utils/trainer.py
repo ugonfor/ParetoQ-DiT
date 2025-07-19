@@ -1,4 +1,4 @@
-from transformers import Trainer
+from transformers import Trainer, TrainerCallback
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import os
@@ -8,6 +8,9 @@ import torch.nn.functional as F
 
 from utils import utils
 from enum import IntEnum
+
+from diffusers import FluxPipeline, DiffusionPipeline
+from pathlib import Path
 
 from logging import getLogger
 logger = getLogger()
@@ -113,7 +116,7 @@ class TorchFileDataset(torch.utils.data.Dataset):
 class FluxQATTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.test_prompt = "A lone violinist playing on top of a sinking airship during golden hour, with sheet music flying into the wind and glowing birds circling above"
+        self.test_prompt = "Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render"
 
     def compute_loss(self, model, inputs, return_outputs=False):
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
@@ -127,6 +130,7 @@ class FluxQATTrainer(Trainer):
             return (loss, pred) if return_outputs else loss
 
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
+        # 사용되지 않음.
         model = self.model
         model.eval()
         device = model.device
@@ -142,7 +146,8 @@ class FluxQATTrainer(Trainer):
         pred = self.pipe(self.test_prompt)
 
         utils.generate_images(pipe, [self.test_prompt], 
-                            1, out_dir=training_args.output_dir / "eval" / f"step_{self.state.global_step}")
+                            1, out_dir=training_args.output_dir / "eval" / f"step_{self.state.global_step}",
+                            seed=42)
     
         psnr = compute_psnr(pred, gt)
         psnr_list.append(psnr)
@@ -170,6 +175,25 @@ class FluxQATTrainer(Trainer):
             else:
                 moved.append(x)
         return tuple(moved)
+
+class EmptyCacheCallback(TrainerCallback):
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step % 1 == 0:  # 100스텝마다
+            torch.cuda.empty_cache()
+            pipe : FluxPipeline = DiffusionPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", torch_dtype=torch.bfloat16).to('cuda')
+            model = kwargs['model'].eval()
+            pipe.transformer = model.to(torch.bfloat16)
+    
+            utils.generate_images(pipe, 
+            ["Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render"], 
+                                1, 
+                                Path(args.output_dir) / "eval" / f"step_{state.global_step}",
+                                'cuda',
+                                seed=42)
+
+            del pipe
+            torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
     dataset = TorchFileDataset(folder_path="./output/dataset")
