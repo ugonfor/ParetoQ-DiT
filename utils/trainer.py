@@ -88,7 +88,7 @@ class MyCollator:
         return custom_collate_fn(batch)
 
 class TorchFileDataset(torch.utils.data.Dataset):
-    def __init__(self, folder_path, debug=False):
+    def __init__(self, folder_path, debug=False, group_size=4): # batch size
         self.file_paths = sorted([
             os.path.join(folder_path, fname)
             for fname in os.listdir(folder_path)
@@ -98,21 +98,46 @@ class TorchFileDataset(torch.utils.data.Dataset):
         if debug: self.file_paths = self.file_paths[:10]
 
         self.total_data = [torch.load(path) for path in self.file_paths]
+        self.group_size = group_size
+        self.seq_len = len(self.total_data[0]["input"])   # 예: 28
+        self.num_groups = (len(self.total_data) + group_size - 1) // group_size
 
     def __len__(self):
         return len(self.total_data) * 28
 
     def __getitem__(self, idx):
+        """
+        idx 가 0‥N*28-1 을 돌 때[]
+        ├─ group_idx      : 몇 번째 4-개 묶음인지
+        ├─ inner_idx      : 시퀀스 안쪽 번호 (0‥27)
+        └─ pos_in_group   : 4-개 묶음 안에서의 위치 (0‥3)
+        """
+        
         if isinstance(idx, slice):
             indices = range(*idx.indices(len(self)))  # slice 객체 → 인덱스 리스트
             return [self[i] for i in indices]  # 재귀적으로 self[i] 호출
-            
-        sample = self.total_data[idx//28]
-        return {
-            "input": sample["input"][idx%28], # type: tuple(Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, dict, None, None, bool, bool)
-            "output": sample["output"][idx%28][0], # type: torch.Tensor
-        }
         
+        # ① 시퀀스 안쪽 번호 (0‥27) — 4칸씩 모은 뒤 28에서 한 바퀴
+        inner_idx = (idx // self.group_size) % self.seq_len
+
+        # ② 몇 번째 4-개 묶음인지
+        group_idx = idx // (self.group_size * self.seq_len)
+
+        # ③ 4-개 묶음 안에서의 위치
+        pos_in_group = idx % self.group_size
+
+        # ④ 실제 sample 인덱스 = 묶음 시작 위치 + pos_in_group
+        sample_idx = group_idx * self.group_size + pos_in_group
+
+        # (마지막 묶음이 4개보다 적을 수 있으니 범위 체크)
+        if sample_idx >= len(self.total_data):
+            raise IndexError("index exceeds available samples")
+
+        sample = self.total_data[sample_idx]
+        return {
+            "input":  sample["input"][inner_idx],      # tuple of tensors
+            "output": sample["output"][inner_idx][0],  # tensor
+        }        
 class FluxQATTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -161,7 +186,7 @@ class FluxQATTrainer(Trainer):
         return DataLoader(
             self.train_dataset,
             batch_size=self.args.train_batch_size,
-            shuffle=True,
+            shuffle=False,
             collate_fn=custom_collate_fn
         )
 
@@ -177,15 +202,15 @@ class FluxQATTrainer(Trainer):
         return tuple(moved)
 
 class EmptyCacheCallback(TrainerCallback):
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step % 1 == 0:  # 100스텝마다
+    def on_step_begin(self, args, state, control, **kwargs):
+        if state.global_step % 50 == 0:  # 50스텝마다
             torch.cuda.empty_cache()
             pipe : FluxPipeline = DiffusionPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", torch_dtype=torch.bfloat16).to('cuda')
             model = kwargs['model'].eval()
             pipe.transformer = model.to(torch.bfloat16)
     
             utils.generate_images(pipe, 
-            ["Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render"], 
+                                ["Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render"], 
                                 1, 
                                 Path(args.output_dir) / "eval" / f"step_{state.global_step}",
                                 'cuda',
