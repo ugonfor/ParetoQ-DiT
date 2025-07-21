@@ -76,13 +76,14 @@ def generate_images(
     seed: int | None = None,
 ) -> None:
     """Generate `num_images` images and save as PNG."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if seed is not None:
-        torch.manual_seed(seed)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if seed is not None:
+            torch.manual_seed(seed)
 
-    pipe.set_progress_bar_config(disable=True)
+        pipe.set_progress_bar_config(disable=True)
 
-    for i in tqdm(range(num_images), desc="Generating"):
-        prompt = prompts[i % len(prompts)]
-        image = pipe(prompt).images[0]
-        image.save(out_dir / f"sample_{i:03d}.png")
+        for i in tqdm(range(num_images), desc="Generating"):
+            prompt = prompts[i % len(prompts)]
+            image = pipe(prompt).images[0]
+            image.save(out_dir / f"sample_{i:03d}.png")
