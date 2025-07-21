@@ -64,7 +64,7 @@ from diffusers.models.attention_processor import (
 )
 
 import torch.nn.functional as F
-from diffusers.models.activations import GEGLU, GELU, ApproximateGELU, FP32SiLU, LinearActivation, SwiGLU
+from diffusers.models.activations import GEGLU, ApproximateGELU, FP32SiLU, LinearActivation, SwiGLU
 from diffusers.utils import deprecate, is_torch_xla_available, logging
 from diffusers.utils.import_utils import is_torch_npu_available, is_torch_xla_version, is_xformers_available
 from diffusers.utils.torch_utils import is_torch_version, maybe_allow_in_graph
@@ -84,6 +84,34 @@ if is_torch_xla_available():
 else:
     XLA_AVAILABLE = False
 
+
+
+class GELU(nn.Module):
+    r"""
+    GELU activation function with tanh approximation support with `approximate="tanh"`.
+
+    Parameters:
+        dim_in (`int`): The number of channels in the input.
+        dim_out (`int`): The number of channels in the output.
+        approximate (`str`, *optional*, defaults to `"none"`): If `"tanh"`, use tanh approximation.
+        bias (`bool`, defaults to True): Whether to use a bias in the linear layer.
+    """
+
+    def __init__(self, dim_in: int, dim_out: int, approximate: str = "none", bias: bool = True, w_bits=0):
+        super().__init__()
+        self.proj = QuantizeLinear(dim_in, dim_out, bias=bias, w_bits=w_bits)
+        self.approximate = approximate
+
+    def gelu(self, gate: torch.Tensor) -> torch.Tensor:
+        if gate.device.type == "mps" and is_torch_version("<", "2.0.0"):
+            # fp16 gelu not supported on mps before torch 2.0
+            return F.gelu(gate.to(dtype=torch.float32), approximate=self.approximate).to(dtype=gate.dtype)
+        return F.gelu(gate, approximate=self.approximate)
+
+    def forward(self, hidden_states):
+        hidden_states = self.proj(hidden_states)
+        hidden_states = self.gelu(hidden_states)
+        return hidden_states
 
 @maybe_allow_in_graph
 class Attention(nn.Module):
@@ -909,7 +937,7 @@ class FeedForward(nn.Module):
         if activation_fn == "gelu":
             act_fn = GELU(dim, inner_dim, bias=bias)
         if activation_fn == "gelu-approximate":
-            act_fn = GELU(dim, inner_dim, approximate="tanh", bias=bias)
+            act_fn = GELU(dim, inner_dim, approximate="tanh", bias=bias, w_bits=w_bits)
         elif activation_fn == "geglu":
             act_fn = GEGLU(dim, inner_dim, bias=bias)
         elif activation_fn == "geglu-approximate":
