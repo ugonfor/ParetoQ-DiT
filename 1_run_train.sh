@@ -13,12 +13,11 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --bf16 True \
 --log_on_each_node False \
 --logging_dir /tmp/output/runs/current \
---num_train_epochs 1 \
---per_device_train_batch_size 8 \
+--num_train_epochs 10 \
+--per_device_train_batch_size 4 \
 --per_device_eval_batch_size 1 \
 --gradient_accumulation_steps 1 \
---evaluation_strategy "steps" \
---eval_steps 100 \
+--evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 100 \
 --report_to "tensorboard" \
@@ -31,6 +30,6 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing True \
 --qat True \
---w_bits 0 \
+--w_bits 2 \
 --ddp_find_unused_parameters False \
 --optim "adamw_bnb_8bit" \
