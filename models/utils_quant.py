@@ -298,8 +298,9 @@ class LoRAQuantizeLinear(nn.Linear):
         bias=False,
         w_bits=16,
         weight_layerwise=False,
-        lora_r=16,
+        lora_r=32,
         lora_alpha=1.0,
+        scale_aware=True, # from efficientDM
     ):
         super(LoRAQuantizeLinear, self).__init__(*kargs, bias=bias)
         self.w_bits = w_bits
@@ -311,16 +312,33 @@ class LoRAQuantizeLinear(nn.Linear):
 
         # LoRA parameters
         self.lora_r = lora_r
-        self.lora_alpha = lora_alpha
         self.scaling = lora_alpha / lora_r if lora_r > 0 else 1.0
         
         if lora_r > 0:
             self.lora_A = nn.Parameter(torch.randn(self.out_features, lora_r) * 0.01)
-            self.lora_B = nn.Parameter(torch.randn(lora_r, self.in_features) * 0.01)
+            self.lora_B = nn.Parameter(torch.Tensor(lora_r, self.in_features))
             
+            # --- register gradient hooks ---------------------------------
+            if scale_aware:
+                self._register_scale_hooks()
+
         else:
             self.lora_A = None
             self.lora_B = None
+
+    # ------------------------------------------------------------------
+    # scale-aware backward: ⍺          ∇θ  ←  ∇θ · mean(s_w)
+    # ------------------------------------------------------------------
+    def _register_scale_hooks(self):
+        def make_hook(param_name):
+            def hook(grad):
+                # average over output-channels
+                sw = self.weight_clip_val.mean() if self.w_bits < 16 else 1.0
+                return grad * sw
+            return hook
+
+        self.lora_A.register_hook(make_hook("lora_A"))
+        self.lora_B.register_hook(make_hook("lora_B"))
 
     def forward(self, input_):
         # quantize weight
