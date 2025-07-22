@@ -3,7 +3,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-torchrun --nnodes=1 --nproc_per_node=1 sanity.py \
+python sanity.py \
 --local_dir "/tmp/flux/" \
 --input_model_filename "black-forest-labs/FLUX.1-dev" \
 --output_model_filename "flux-dev" \

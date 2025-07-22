@@ -24,7 +24,33 @@ from utils.prompt_list import get_default_prompts
 from pathlib import Path
 from tqdm import tqdm
 
+import torch.nn as nn
+
 log = utils.get_logger("clm")
+
+def count_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    linear_params = 0
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            if not 'transformer' in name:
+                continue
+            # if 'norm' in name:
+            #     continue
+            linear_params += sum(p.numel() for p in module.parameters())
+
+    ratio = linear_params / total_params if total_params > 0 else 0
+
+    print(f"Total parameters: {total_params}")
+    print(f"Linear layer parameters: {linear_params}")
+    print(f"Linear layer parameter ratio: {ratio:.4f}")
+
+    return {
+        "total": total_params,
+        "linear": linear_params,
+        "ratio": ratio
+    }
 
 def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
@@ -73,7 +99,7 @@ def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
 
 
 def sanity(debug=False):
-    dist.init_process_group(backend="nccl")
+    # dist.init_process_group(backend="nccl")
     model_args, data_args, training_args = process_args()
     if debug: print(model_args, data_args, training_args)
 
@@ -82,6 +108,8 @@ def sanity(debug=False):
     # Sanity Check Full Precision
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
     pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
+
+    count_parameters(pipe.transformer)
 
     samples_dir = Path(training_args.output_dir) / "samples" / "bf16"
     print(f"Generating 2 sample images …")
