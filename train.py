@@ -25,6 +25,7 @@ from utils.prompt_list import get_default_prompts, get_prompt
 from pathlib import Path
 from tqdm import tqdm
 import gc
+from torch.utils.data import Subset
 
 log = utils.get_logger("clm")
 
@@ -139,7 +140,8 @@ def train(debug=False):
 
     ## Load Dataset
     dataset = trainer.TorchFileDataset(dataset_dir, debug=debug, group_size=training_args.train_batch_size)
-    train_data, valid_data = dataset, dataset[-1:]
+    train_data = dataset
+    valid_data = Subset(dataset, list(range(28 * 4)))
 
     log.info(f"train dataset size: {len(train_data)}")
 
@@ -187,7 +189,9 @@ def train(debug=False):
     if training_args.do_train:
         gc.collect()
         torch.cuda.empty_cache()
-        train_result = mytrainer.train()
+        train_result = mytrainer.train(
+        resume_from_checkpoint=True
+        )
         mytrainer.save_state()
         utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
 
