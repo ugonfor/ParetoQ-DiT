@@ -17,11 +17,12 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --per_device_train_batch_size 4 \
 --per_device_eval_batch_size 1 \
 --gradient_accumulation_steps 1 \
---evaluation_strategy "no" \
+--evaluation_strategy "steps" \
+--eval_steps 500 \
 --save_strategy "steps" \
---save_steps 100 \
+--save_steps 500 \
 --report_to "tensorboard" \
---save_total_limit 1 \
+--save_total_limit 5 \
 --learning_rate 2e-5 \
 --weight_decay 0. \
 --warmup_ratio 0. \
@@ -33,3 +34,6 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --w_bits 2 \
 --ddp_find_unused_parameters False \
 --optim "adamw_bnb_8bit" \
+--load_best_model_at_end True \
+--metric_for_best_model "eval_loss" \
+--greater_is_better False
