@@ -55,45 +55,34 @@ def count_parameters(model):
 def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
-    if (cache_dir / "diffusion_pytorch_model.safetensors.index.json").exists():
-        log.info(f"Loading quantized model from cache directory: {cache_dir}")
-        model = FluxTransformer2DModelQuant.from_pretrained(
-            pretrained_model_name_or_path=cache_dir,
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-            device_map=None,
-            w_bits=w_bits
-        )
-    else:
-        model = FluxTransformer2DModelQuant.from_pretrained(
-            pretrained_model_name_or_path=model_args.input_model_filename,
-            subfolder="transformer",
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-            device_map=None,
-            w_bits=w_bits
-        )
+    model = FluxTransformer2DModelQuant.from_pretrained(
+        pretrained_model_name_or_path=model_args.input_model_filename,
+        subfolder="transformer",
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+        device_map=None,
+        w_bits=w_bits
+    )
 
-    if not model_args.contain_weight_clip_val:
-        weight_clip_val_dict = {}
-        for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
-            if "weight_clip_val" in name:
-                weight_name = name.replace("weight_clip_val", "weight")
-                weight_param = dict(model.named_parameters()).get(weight_name, None)
+    weight_clip_val_dict = {}
+    for name, param in tqdm(model.named_parameters(), desc="Initializing weight_clip_val"):
+        if "weight_clip_val" in name:
+            weight_name = name.replace("weight_clip_val", "weight")
+            weight_param = dict(model.named_parameters()).get(weight_name, None)
 
-                if w_bits == 1:
-                    scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif w_bits == 0 or w_bits == 2:
-                    scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif 3 <= w_bits and w_bits <= 8:
-                    xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (w_bits - 1) - 1
-                    scale = xmax / maxq
-                else:
-                    raise NotImplementedError
-                    
-                weight_clip_val_dict[name] = scale
-        model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
+            if w_bits == 1:
+                scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
+            elif w_bits == 0 or w_bits == 2:
+                scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+            elif 3 <= w_bits and w_bits <= 8:
+                xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                maxq = 2 ** (w_bits - 1) - 1
+                scale = xmax / maxq
+            else:
+                raise NotImplementedError
+                
+            weight_clip_val_dict[name] = scale
+    model.load_state_dict(weight_clip_val_dict, assign=True, strict=False)
     
     return model
 
