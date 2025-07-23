@@ -3,7 +3,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-torchrun --nnodes=1 --nproc_per_node=1 train.py \
+torchrun --nnodes=1 --nproc_per_node=$1 train.py \
 --local_dir "/tmp/flux/" \
 --input_model_filename "black-forest-labs/FLUX.1-dev" \
 --output_model_filename "flux-dev" \
@@ -13,11 +13,11 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --bf16 True \
 --log_on_each_node False \
 --logging_dir /tmp/output/runs/current \
---num_train_epochs 10 \
---per_device_train_batch_size 4 \
+--num_train_epochs 1 \
+--per_device_train_batch_size $2 \
 --per_device_eval_batch_size 1 \
---gradient_accumulation_steps 1 \
---evaluation_strategy "steps" \
+--gradient_accumulation_steps $3 \
+--evaluation_strategy "no" \
 --eval_steps 500 \
 --save_strategy "steps" \
 --save_steps 500 \
@@ -31,9 +31,9 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing True \
 --qat True \
---w_bits 2 \
---ddp_find_unused_parameters False \
+--w_bits 0 \
+--ddp_find_unused_parameters True \
 --optim "adamw_bnb_8bit" \
---load_best_model_at_end True \
---metric_for_best_model "eval_loss" \
---greater_is_better False
+# --load_best_model_at_end True \
+# --metric_for_best_model "eval_loss" \
+# --greater_is_better False
