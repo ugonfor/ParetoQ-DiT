@@ -85,7 +85,7 @@ def train(debug=False):
     dataset_dir.mkdir(exist_ok=True)
 
     ## Load Prompt List
-    prompt_list = get_default_prompts() # get_prompt(1000) # get_default_prompts()
+    prompt_list = get_prompt(3000) if not debug else get_default_prompts()
 
     ## Dataset Generation
     if not (dataset_dir / f'{len(prompt_list)-1}_{prompt_list[-1].replace(" ", "_")}').exists():
