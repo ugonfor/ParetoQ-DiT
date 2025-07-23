@@ -38,7 +38,7 @@ from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import CombinedTimestepGuidanceTextProjEmbeddings, CombinedTimestepTextProjEmbeddings, FluxPosEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
+from diffusers.models.normalization import AdaLayerNormContinuous # , AdaLayerNormZero, AdaLayerNormZeroSingle
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -68,6 +68,8 @@ from diffusers.models.activations import GEGLU, ApproximateGELU, FP32SiLU, Linea
 from diffusers.utils import deprecate, is_torch_xla_available, logging
 from diffusers.utils.import_utils import is_torch_npu_available, is_torch_xla_version, is_xformers_available
 from diffusers.utils.torch_utils import is_torch_version, maybe_allow_in_graph
+from diffusers.models.embeddings import CombinedTimestepLabelEmbeddings, PixArtAlphaCombinedTimestepSizeEmbeddings
+from diffusers.models.normalization import FP32LayerNorm
 
 if is_xformers_available():
     import xformers
@@ -84,6 +86,80 @@ if is_torch_xla_available():
 else:
     XLA_AVAILABLE = False
 
+
+class AdaLayerNormZero(nn.Module):
+    r"""
+    Norm layer adaptive layer norm zero (adaLN-Zero).
+
+    Parameters:
+        embedding_dim (`int`): The size of each embedding vector.
+        num_embeddings (`int`): The size of the embeddings dictionary.
+    """
+
+    def __init__(self, embedding_dim: int, num_embeddings: Optional[int] = None, norm_type="layer_norm", bias=True, w_bits=0):
+        super().__init__()
+        if num_embeddings is not None:
+            self.emb = CombinedTimestepLabelEmbeddings(num_embeddings, embedding_dim)
+        else:
+            self.emb = None
+
+        self.silu = nn.SiLU()
+        self.linear = QuantizeLinear(embedding_dim, 6 * embedding_dim, bias=bias, w_bits=w_bits)
+        if norm_type == "layer_norm":
+            self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
+        elif norm_type == "fp32_layer_norm":
+            self.norm = FP32LayerNorm(embedding_dim, elementwise_affine=False, bias=False)
+        else:
+            raise ValueError(
+                f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        timestep: Optional[torch.Tensor] = None,
+        class_labels: Optional[torch.LongTensor] = None,
+        hidden_dtype: Optional[torch.dtype] = None,
+        emb: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.emb is not None:
+            emb = self.emb(timestep, class_labels, hidden_dtype=hidden_dtype)
+        emb = self.linear(self.silu(emb))
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.chunk(6, dim=1)
+        x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
+
+
+class AdaLayerNormZeroSingle(nn.Module):
+    r"""
+    Norm layer adaptive layer norm zero (adaLN-Zero).
+
+    Parameters:
+        embedding_dim (`int`): The size of each embedding vector.
+        num_embeddings (`int`): The size of the embeddings dictionary.
+    """
+
+    def __init__(self, embedding_dim: int, norm_type="layer_norm", bias=True, w_bits=0):
+        super().__init__()
+
+        self.silu = nn.SiLU()
+        self.linear = QuantizeLinear(embedding_dim, 3 * embedding_dim, bias=bias, w_bits=w_bits)
+        if norm_type == "layer_norm":
+            self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
+        else:
+            raise ValueError(
+                f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        emb: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        emb = self.linear(self.silu(emb))
+        shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=1)
+        x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        return x, gate_msa
 
 
 class GELU(nn.Module):
@@ -966,20 +1042,14 @@ class FeedForward(nn.Module):
             hidden_states = module(hidden_states)
         return hidden_states
 
-
-
-
 #########################################################################################################
-
-
-
 @maybe_allow_in_graph
 class FluxSingleTransformerBlock(nn.Module):
     def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: float = 4.0, w_bits: int = 0):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
-        self.norm = AdaLayerNormZeroSingle(dim)
+        self.norm = AdaLayerNormZeroSingle(dim, w_bits=w_bits)
         self.proj_mlp = QuantizeLinear(dim, self.mlp_hidden_dim, w_bits=w_bits, bias=True)
         self.act_mlp = nn.GELU(approximate="tanh")
         self.proj_out = QuantizeLinear(dim + self.mlp_hidden_dim, dim, w_bits=w_bits, bias=True)
@@ -1048,8 +1118,8 @@ class FluxTransformerBlock(nn.Module):
     ):
         super().__init__()
 
-        self.norm1 = AdaLayerNormZero(dim)
-        self.norm1_context = AdaLayerNormZero(dim)
+        self.norm1 = AdaLayerNormZero(dim, w_bits=w_bits)
+        self.norm1_context = AdaLayerNormZero(dim, w_bits=w_bits)
 
         self.attn = Attention(
             query_dim=dim,
