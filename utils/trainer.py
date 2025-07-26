@@ -87,10 +87,6 @@ def custom_collate_fn(batch):
         "output": collated_output
     }
 
-class MyCollator:
-    def __call__(self, batch):
-        return custom_collate_fn(batch)
-
 class TorchFileDataset(torch.utils.data.Dataset):
     def __init__(self, folder_path, debug=False, group_size=4): # batch size
         self.file_paths = sorted([

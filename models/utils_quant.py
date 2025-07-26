@@ -316,7 +316,7 @@ class LoRAQuantizeLinear(nn.Linear):
         
         if lora_r > 0:
             self.lora_A = nn.Parameter(torch.randn(self.out_features, lora_r) * 0.01)
-            self.lora_B = nn.Parameter(torch.Tensor(lora_r, self.in_features))
+            self.lora_B = nn.Parameter(torch.zeros(lora_r, self.in_features) * 0)
             
             # --- register gradient hooks ---------------------------------
             if scale_aware:
@@ -352,7 +352,7 @@ class LoRAQuantizeLinear(nn.Linear):
 
 
         if self.w_bits >= 16:
-            weight = self.weight
+            weight = real_weights
         elif self.w_bits == 2 or self.w_bits == 0: # w_bits == 0 for 1.58-bit quant
             weight = StretchedElasticQuant.apply(
                 real_weights,
@@ -376,3 +376,6 @@ class LoRAQuantizeLinear(nn.Linear):
             out += self.bias.view(1, -1).expand_as(out)
 
         return out
+
+    def extra_repr(self) -> str:
+        return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, w_bits={self.w_bits}, layerwise={self.weight_layerwise}, lora_r={self.lora_r}"

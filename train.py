@@ -149,15 +149,6 @@ def train(debug=False):
     ## Freeze non-LoRA params
     total_params = list(map(lambda x: x[0], q_model.named_parameters()))
     for name, param in q_model.named_parameters():
-        # if "lora" in name.split(".")[-1]:
-        #     param.requires_grad = True
-
-        # elif "weight_clip_val" == name.split(".")[-1]:
-        #     param.requires_grad = True
-
-        # else:
-        #     param.requires_grad = False
-
         if name.split(".")[-1] == "weight":
             # For LoRA Weight... unable real_weight update
             tmp = name.split(".")
@@ -165,15 +156,7 @@ def train(debug=False):
 
             if ".".join(tmp) in total_params:
                 param.requires_grad = False
-            
-            # # For NonQuantizedLinear... unable weight update
-            # tmp = name.split(".")
-            # tmp[-1] = "weight_clip_val"
-
-            # if not ".".join(tmp) in total_params and \
-            #     not "norm" in name:
-            #     param.requires_grad = False
-            #     print(name)
+        
 
     ## Load Trainer
     mytrainer = trainer.FluxQATTrainer(
@@ -181,7 +164,7 @@ def train(debug=False):
         args=training_args,
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
-        data_collator=trainer.MyCollator(),
+        data_collator=trainer.custom_collate_fn,
         callbacks=[trainer.EmptyCacheCallback],
     )
     
@@ -190,7 +173,7 @@ def train(debug=False):
         gc.collect()
         torch.cuda.empty_cache()
         train_result = mytrainer.train(
-        resume_from_checkpoint=True
+            resume_from_checkpoint=training_args.resume_from_checkpoint
         )
         mytrainer.save_state()
         utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
