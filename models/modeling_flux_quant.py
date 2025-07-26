@@ -38,13 +38,14 @@ from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import CombinedTimestepGuidanceTextProjEmbeddings, CombinedTimestepTextProjEmbeddings, FluxPosEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormContinuous # , AdaLayerNormZero, AdaLayerNormZeroSingle
+from diffusers.models.normalization import AdaLayerNormContinuous #, AdaLayerNormZero, AdaLayerNormZeroSingle
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 ############################################# Flux Model Quantization ####################################
 # from .utils_quant import QuantizeLinear
 from .utils_quant import LoRAQuantizeLinear as QuantizeLinear
+quantize_norm = True
 ##########################################################################################################
 
 
@@ -104,7 +105,7 @@ class AdaLayerNormZero(nn.Module):
             self.emb = None
 
         self.silu = nn.SiLU()
-        self.linear = QuantizeLinear(embedding_dim, 6 * embedding_dim, bias=bias, w_bits=w_bits)
+        self.linear = QuantizeLinear(embedding_dim, 6 * embedding_dim, bias=bias, w_bits=w_bits) if quantize_norm else nn.Linear(embedding_dim, 6 * embedding_dim, bias=bias)
         if norm_type == "layer_norm":
             self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
         elif norm_type == "fp32_layer_norm":
@@ -143,7 +144,7 @@ class AdaLayerNormZeroSingle(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = QuantizeLinear(embedding_dim, 3 * embedding_dim, bias=bias, w_bits=w_bits)
+        self.linear = QuantizeLinear(embedding_dim, 3 * embedding_dim, bias=bias, w_bits=w_bits) if quantize_norm else nn.Linear(embedding_dim, 3 * embedding_dim, bias=bias)
         if norm_type == "layer_norm":
             self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
         else:
