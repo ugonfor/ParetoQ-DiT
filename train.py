@@ -69,6 +69,7 @@ def train(debug=False):
     dist.init_process_group(backend="nccl")
     model_args, data_args, training_args = process_args()
     
+    
     ### Dataset Generation
     ## Configuration
     dataset_dir = Path(training_args.output_dir) / "dataset"
@@ -155,7 +156,7 @@ def train(debug=False):
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
         data_collator=trainer.custom_collate_fn,
-        callbacks=[trainer.EmptyCacheCallback],
+        callbacks=[trainer.EmptyCacheCallback(save_path=training_args.output_dir)],
     )
     
     # Do Train

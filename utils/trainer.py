@@ -154,33 +154,6 @@ class FluxQATTrainer(Trainer):
 
             return (loss, pred) if return_outputs else loss
 
-    # def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
-    #     # 사용되지 않음.
-    #     model = self.model
-    #     model.eval()
-    #     device = model.device
-
-    #     psnr_list = []
-
-    #     self.pipe.transformer = self.org_model
-    #     self.pipe = self.pipe.to(device)
-    #     gt = self.pipe(self.test_prompt)
-
-    #     self.pipe.transformer = model
-    #     self.pipe = self.pipe.to(device)
-    #     pred = self.pipe(self.test_prompt)
-
-    #     utils.generate_images(pipe, [self.test_prompt], 
-    #                         1, out_dir=training_args.output_dir / "eval" / f"step_{self.state.global_step}",
-    #                         seed=42)
-    
-    #     psnr = compute_psnr(pred, gt)
-    #     psnr_list.append(psnr)
-
-    #     avg_psnr = sum(psnr_list) / len(psnr_list)
-    #     print(f"[Evaluate] PSNR from FluxPipeline: {avg_psnr:.2f} dB")
-
-    #     return {f"{metric_key_prefix}_psnr": avg_psnr}
         
     def get_train_dataloader(self):
         return DataLoader(
@@ -202,10 +175,10 @@ class FluxQATTrainer(Trainer):
         return tuple(moved)
 
 class EmptyCacheCallback(TrainerCallback):
-    def __init__(self):
+    def __init__(self, save_path="./output/"):
         self.best_reward = float("-inf")
         self.last_generated_dir = None 
-        self.save_path = "./output/"
+        self.save_path = save_path
 
     def on_step_begin(self, args, state, control, **kwargs):
         if state.global_step % 50 == 0:  # 50스텝마다
@@ -218,44 +191,16 @@ class EmptyCacheCallback(TrainerCallback):
                                 ["Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render",
                                 "A cat made of sea water walking in a library.", "A television on the top of a bird"], 
                                 3, 
-                                Path(args.output_dir) / "eval" / f"step_{state.global_step}",
+                                Path(self.save_path) / "eval" / f"step_{state.global_step}",
                                 'cuda',
                                 seed=42)
             
             del pipe
             torch.cuda.empty_cache()
             
-            out_dir = Path(args.output_dir) / "eval" / f"step_{state.global_step}"
+            out_dir = Path(self.save_path) / "eval" / f"step_{state.global_step}"
             self.last_generated_dir = out_dir  # 여기 저장!
 
-    
-    # def on_evaluate(self, args, state, control, **kwargs):
-    #     model = kwargs["model"]
-    #     trainer = kwargs["trainer"]  # 핵심! 전체 상태 저장을 위해 필요
-
-    #     if self.last_generated_dir is None:
-    #         print("[callback] No generated images to evaluate.")
-    #         return
-
-    #     # reward 계산
-    #     image_paths = [self.out_dir / f"sample_{i:03d}.png" for i in range(3)]
-    #     prompts = [
-    #         "Cyberpunk samurai on a neon-lit rooftop at dusk, dramatic rim lighting, 32-bit render",
-    #         "A cat made of sea water walking in a library.", 
-    #         "A television on the top of a bird"
-    #     ]
-    #     reward = [model.score(prompts[i], image_paths[i]) for i in range(3)]
-    #     reward = sum(reward)/3
-
-    #     print(f"[callback] reward: {reward:.4f}")
-
-    #     if reward > self.best_reward:
-    #         self.best_reward = reward
-    #         print(f"[callback] Saving new best checkpoint at reward {reward:.4f}")
-
-    #         self.save_path.mkdir(parents=True, exist_ok=True)
-    #         trainer.save_model(str(self.save_path))  # model + tokenizer + config 저장
-    #         trainer.save_state()                    # optimizer, scheduler 등 상태 저장
 
 if __name__ == "__main__":
     dataset = TorchFileDataset(folder_path="./output/dataset")
