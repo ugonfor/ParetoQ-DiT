@@ -37,7 +37,7 @@ torchrun --nnodes=1 --nproc_per_node=$1 train.py \
 --w_bits 0 \
 --ddp_find_unused_parameters True \
 --optim "adamw_bnb_8bit" \
---resume_from_checkpoint True \
+# --resume_from_checkpoint <path/to/checkpoint> \
 # --load_best_model_at_end True \
 # --metric_for_best_model "eval_loss" \
 # --greater_is_better False

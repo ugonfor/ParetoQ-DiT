@@ -163,7 +163,7 @@ def train(debug=False):
         gc.collect()
         torch.cuda.empty_cache()
         train_result = mytrainer.train(
-            resume_from_checkpoint=training_args.resume_from_checkpoint
+            resume_from_checkpoint=True
         )
         mytrainer.save_state()
         utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
