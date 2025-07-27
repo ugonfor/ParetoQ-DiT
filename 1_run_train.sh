@@ -3,6 +3,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# --input_model_filename "Freepik/flux.1-lite-8B" \
+
+# bash 1_run_train.sh 1 4 1
 torchrun --nnodes=1 --nproc_per_node=$1 train.py \
 --local_dir "/tmp/flux/" \
 --input_model_filename "black-forest-labs/FLUX.1-dev" \
@@ -34,6 +37,7 @@ torchrun --nnodes=1 --nproc_per_node=$1 train.py \
 --w_bits 0 \
 --ddp_find_unused_parameters True \
 --optim "adamw_bnb_8bit" \
+--resume_from_checkpoint True \
 # --load_best_model_at_end True \
 # --metric_for_best_model "eval_loss" \
 # --greater_is_better False
