@@ -36,8 +36,6 @@ def count_parameters(model):
         if isinstance(module, nn.Linear):
             if not 'transformer' in name:
                 continue
-            # if 'norm' in name:
-            #     continue
             linear_params += sum(p.numel() for p in module.parameters())
 
     ratio = linear_params / total_params if total_params > 0 else 0
@@ -52,7 +50,7 @@ def count_parameters(model):
         "ratio": ratio
     }
 
-def load_quantized_model(model_args, training_args, cache_dir: Path, w_bits=16):
+def load_quantized_model(model_args, training_args, w_bits=16):
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
     model = FluxTransformer2DModelQuant.from_pretrained(
@@ -104,12 +102,15 @@ def sanity(debug=False):
     print(f"Generating 2 sample images …")
     utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
     print(f"Samples saved to '{samples_dir}'")
+    
+    del pipe.transformer
+    torch.cuda.empty_cache()
 
-    for w_bits in [16, 8, 4, 2, 0]:
+    for w_bits in [16, 8]: # 2, 0]: # 16, 8, 4, 2, 0]:
         # load model
         log.info(f"Start to load model... w_bits: {w_bits}")
         cache_dir = Path(training_args.output_dir) / "cache" / f"bits_{w_bits}"
-        model = load_quantized_model(model_args, training_args, cache_dir, w_bits=w_bits)
+        model = load_quantized_model(model_args, training_args, w_bits=w_bits)
         model.cuda()
         pipe.transformer = model
         log.info("Complete model loading...")
@@ -119,6 +120,8 @@ def sanity(debug=False):
         print(f"Generating 2 sample images …")
         utils.generate_images(pipe, prompts, 2, samples_dir, 'cuda', seed=42)
         print(f"Samples saved to '{samples_dir}'")
+
+        breakpoint()
 
         # save and remove model
         model.save_pretrained(cache_dir)

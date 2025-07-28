@@ -83,9 +83,9 @@ def train(debug=False):
         ## Load Model
         dtype = torch.bfloat16 if training_args.bf16 else torch.float
         pipe: FluxPipeline = DiffusionPipeline.from_pretrained(model_args.input_model_filename, torch_dtype=dtype).to('cuda')
-        cache_dir = Path(training_args.output_dir) / "cache" / f"bits_16" 
         org_model = FluxTransformer2DModelQuant.from_pretrained(
-                pretrained_model_name_or_path=cache_dir,
+                pretrained_model_name_or_path=model_args.input_model_filename,
+                subfolder="transformer",
                 torch_dtype=dtype,
                 low_cpu_mem_usage=False,
                 device_map=None,
@@ -164,7 +164,7 @@ def train(debug=False):
         gc.collect()
         torch.cuda.empty_cache()
         train_result = mytrainer.train(
-            resume_from_checkpoint=training_args.resume_from_checkpoint
+            resume_from_checkpoint=True
         )
         mytrainer.save_state()
         utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
