@@ -34,7 +34,7 @@ torchrun --nnodes=1 --nproc_per_node=$1 train.py \
 --tf32 False \
 --gradient_checkpointing True \
 --qat True \
---w_bits 0 \
+--w_bits 4 \
 --ddp_find_unused_parameters True \
 --optim "adamw_bnb_8bit" \
 # --resume_from_checkpoint <path/to/checkpoint> \

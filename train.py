@@ -19,6 +19,7 @@ from utils import trainer
 from utils.process_args import process_args
 from torch import distributed as dist
 from transformers import default_data_collator, Trainer
+from transformers.trainer_utils import get_last_checkpoint
 
 from utils.prompt_list import get_default_prompts, get_prompt
 
@@ -163,8 +164,19 @@ def train(debug=False):
     if training_args.do_train:
         gc.collect()
         torch.cuda.empty_cache()
+
+        last_checkpoint = None
+        if Path(training_args.output_dir).exists():
+            last_checkpoint = get_last_checkpoint(training_args.output_dir)
+
+        resume_checkpoint = (
+            training_args.resume_from_checkpoint
+            if training_args.resume_from_checkpoint
+            else last_checkpoint
+        )
+
         train_result = mytrainer.train(
-            resume_from_checkpoint=True
+            resume_from_checkpoint=resume_checkpoint
         )
         mytrainer.save_state()
         utils.safe_save_model_for_hf_trainer(mytrainer, model_args.output_model_local_path)
